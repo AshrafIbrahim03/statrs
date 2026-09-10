@@ -1,4 +1,8 @@
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    ops::{Deref, Index},
+    slice::SliceIndex,
+};
 
 pub enum SortError {
     NotSorted,
@@ -72,5 +76,62 @@ impl<'a, T> AsRef<[T]> for SortedCollection<'a, T> {
             Collection::Ref(items) => items,
             Collection::Owned(ref items) => items.as_ref(),
         }
+    }
+}
+
+#[derive(Debug)]
+enum SortMarker {
+    NotSorted,
+    Sorted,
+}
+
+#[derive(Debug)]
+pub struct SortedVec<T: Ord>(SortMarker, Vec<T>);
+
+impl<T> SortedVec<T>
+where
+    T: Ord + Clone,
+{
+    pub fn sort(&mut self) {
+        self.1.sort();
+        self.0 = SortMarker::Sorted;
+    }
+}
+
+impl<F, T> From<F> for SortedVec<T>
+where
+    F: Into<Vec<T>> + Iterator<Item = T> + Copy,
+    T: Ord + Clone,
+{
+    fn from(value: F) -> Self {
+        let marker = match value.is_sorted() {
+            true => SortMarker::Sorted,
+            false => SortMarker::NotSorted,
+        };
+
+        Self(marker, value.into())
+    }
+}
+
+impl<T> Deref for SortedVec<T>
+where
+    T: Ord,
+{
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        self.1.deref()
+    }
+}
+
+impl<T, I> Index<I> for SortedVec<T>
+where
+    T: Ord,
+    I: SliceIndex<[T]>,
+{
+    type Output = <I as SliceIndex<[T]>>::Output;
+
+    fn index(&self, index: I) -> &Self::Output {
+        self.1.index(index)
     }
 }
