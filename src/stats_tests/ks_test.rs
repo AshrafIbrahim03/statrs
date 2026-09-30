@@ -11,7 +11,7 @@ use num_traits::clamp;
 use crate::distribution::ContinuousCDF;
 
 use crate::function::factorial;
-use crate::sorted_slice::SortedSlice;
+use crate::sorted_slice::{SortError, SortedSlice};
 
 use super::NaNPolicy;
 
@@ -28,6 +28,13 @@ pub enum KSTestError {
     /// `KSOneSampleAlternativeMethod::TwoSidedExact`selected with the size of the data (`n`) being
     /// too large
     ExactAndTooLarge,
+    SortedSliceError(SortError),
+}
+
+impl From<SortError> for KSTestError {
+    fn from(value: SortError) -> Self {
+        value.into()
+    }
 }
 
 impl core::fmt::Display for KSTestError {
@@ -49,6 +56,7 @@ impl core::fmt::Display for KSTestError {
                 f,
                 "`KSOneSampleAlternativeMethod::TwoSidedExact`selected with the size of the data (`n`) being too large"
             ),
+            KSTestError::SortedSliceError(sort_error) => sort_error.fmt(f),
         }
     }
 }
@@ -204,15 +212,17 @@ fn onesample_marsaglia_et_al_twosided_pvalue(d: f64, n: f64) -> Result<f64, KSTe
 /// )
 /// .unwrap();
 /// ```
-pub fn ks_onesample<T>(
-    data: SortedSlice<f64>,
+pub fn ks_onesample<'a, T, S>(
+    data: S,
     distribution: &T,
     method: KSOneSampleAlternativeMethod,
     nan_policy: NaNPolicy,
 ) -> Result<(f64, f64), KSTestError>
 where
     T: ContinuousCDF<f64, f64>,
+    S: TryInto<SortedSlice<'a, f64>, Error = SortError>,
 {
+    let data = data.try_into()?;
     let has_nans = data.iter().any(|x| x.is_nan());
     let data: Vec<f64> = match (has_nans, nan_policy) {
         (true, NaNPolicy::Propogate) => return Ok((f64::NAN, f64::NAN)),
@@ -378,12 +388,17 @@ fn twosample_schroer_and_trenkler_twosided_pvalue(d: f64, m: usize, n: usize) ->
 ///   NaNPolicy::Error,
 /// ).unwrap();
 /// ```
-pub fn ks_twosample(
-    data1: SortedSlice<f64>,
-    data2: SortedSlice<f64>,
+pub fn ks_twosample<'a, S>(
+    data1: S,
+    data2: S,
     method: KSTwoSampleAlternativeMethod,
     nan_policy: NaNPolicy,
-) -> Result<(f64, f64), KSTestError> {
+) -> Result<(f64, f64), KSTestError>
+where
+    S: TryInto<SortedSlice<'a, f64>, Error = SortError>,
+{
+    let data1: SortedSlice<f64> = data1.try_into()?;
+    let data2: SortedSlice<f64> = data2.try_into()?;
     let has_nans1 = data1.iter().any(|x| x.is_nan());
 
     let data1: Vec<f64> = match (has_nans1, nan_policy) {
@@ -493,9 +508,7 @@ mod tests {
         data.sort_by(|a, b| a.total_cmp(b));
 
         let (statistic, pvalue) = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Exp::new(1.0 / mean).unwrap(),
             KSOneSampleAlternativeMethod::Less,
             NaNPolicy::Error,
@@ -507,9 +520,7 @@ mod tests {
         prec::assert_abs_diff_eq!(pvalue, 0.01768990758651141, epsilon = 1e-9);
 
         let (statistic, pvalue) = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Exp::new(1.0 / mean).unwrap(),
             KSOneSampleAlternativeMethod::Greater,
             NaNPolicy::Error,
@@ -520,9 +531,7 @@ mod tests {
         prec::assert_abs_diff_eq!(pvalue, 0.18683781649758202, epsilon = 1e-9);
 
         let (statistic, pvalue) = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Exp::new(1.0 / mean).unwrap(),
             KSOneSampleAlternativeMethod::TwoSidedAsymptotic,
             NaNPolicy::Error,
@@ -533,9 +542,7 @@ mod tests {
         prec::assert_abs_diff_eq!(pvalue, 0.047499850721610656, epsilon = 1e-9);
 
         let (statistic, pvalue) = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Exp::new(1.0 / mean).unwrap(),
             KSOneSampleAlternativeMethod::TwoSidedApproximate,
             NaNPolicy::Error,
@@ -546,9 +553,7 @@ mod tests {
         prec::assert_abs_diff_eq!(pvalue, 0.03537981517302282, epsilon = 1e-9);
 
         let (statistic, pvalue) = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Exp::new(1.0 / mean).unwrap(),
             KSOneSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
@@ -564,9 +569,7 @@ mod tests {
 
         data.sort_by(|a, b| a.total_cmp(b));
         let (statistic, pvalue) = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Normal::default(),
             KSOneSampleAlternativeMethod::Less,
             NaNPolicy::Error,
@@ -577,9 +580,7 @@ mod tests {
         prec::assert_abs_diff_eq!(pvalue, 0.06508, epsilon = 1e-3);
 
         let (statistic, pvalue) = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Normal::default(),
             KSOneSampleAlternativeMethod::TwoSidedAsymptotic,
             NaNPolicy::Error,
@@ -605,10 +606,7 @@ mod tests {
         let mut data_small_enough: Vec<f64> = (0..140).map(|i| i as f64 * 0.01).collect();
         data_small_enough.sort_by(|a, b| a.total_cmp(b));
         let (statistic, pvalue) = ks_onesample(
-            data_small_enough
-                .as_slice()
-                .try_into()
-                .expect("`data_small_enough should've been sorted by now"),
+            data_small_enough.as_slice(),
             &Uniform::default(),
             KSOneSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
@@ -618,9 +616,7 @@ mod tests {
         prec::assert_abs_diff_eq!(pvalue, 1.311e-10, epsilon = 1e-12);
 
         let (statistic, pvalue) = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data should've been sorted by now"),
+            data.as_slice(),
             &Uniform::default(),
             KSOneSampleAlternativeMethod::TwoSidedAsymptotic,
             NaNPolicy::Error,
@@ -645,9 +641,7 @@ mod tests {
         let mut data: Vec<f64> = Vec::new();
         data.sort_by(|a, b| a.total_cmp(b));
         let result = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Normal::default(),
             KSOneSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
@@ -657,9 +651,7 @@ mod tests {
         let mut data: Vec<f64> = Vec::from([f64::NAN, f64::NAN]);
         data.sort_by(|a, b| a.total_cmp(b));
         let result = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Normal::default(),
             KSOneSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Emit,
@@ -671,9 +663,7 @@ mod tests {
         let mut data: Vec<f64> = (-150..=150).map(|i| i as f64 * 0.01).collect();
         data.sort_by(|a, b| a.total_cmp(b));
         let result = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Normal::default(),
             KSOneSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
@@ -686,9 +676,7 @@ mod tests {
         data[0] = data[1];
         data.sort_by(|a, b| a.total_cmp(b));
         let result = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Normal::default(),
             KSOneSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
@@ -719,9 +707,7 @@ mod tests {
 
         data.sort_by(|a, b| a.total_cmp(b));
         let (statistic, pvalue) = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Exp::new(1.0 / mean).unwrap(),
             KSOneSampleAlternativeMethod::Less,
             NaNPolicy::Emit,
@@ -738,9 +724,7 @@ mod tests {
         data[0] = f64::NAN;
         data.sort_by(|a, b| a.total_cmp(b));
         let (statistic, pvalue) = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Normal::default(),
             KSOneSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Propogate,
@@ -755,9 +739,7 @@ mod tests {
         data[0] = f64::NAN;
         data.sort_by(|a, b| a.total_cmp(b));
         let result = ks_onesample(
-            data.as_slice()
-                .try_into()
-                .expect("`data` should've been sorted by now"),
+            data.as_slice(),
             &Normal::default(),
             KSOneSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
@@ -801,8 +783,8 @@ mod tests {
         data2.sort_by(|a, b| a.total_cmp(b));
 
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
         )
@@ -811,8 +793,8 @@ mod tests {
         prec::assert_abs_diff_eq!(statistic, 0.26666666666666666, epsilon = 1e-9);
         prec::assert_abs_diff_eq!(pvalue, 0.7315422361996597, epsilon = 1e-9);
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
         )
@@ -822,8 +804,8 @@ mod tests {
         prec::assert_abs_diff_eq!(pvalue, 0.7315422361996597, epsilon = 1e-9);
 
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::LessAsymptotic,
             NaNPolicy::Error,
         )
@@ -832,8 +814,8 @@ mod tests {
         prec::assert_abs_diff_eq!(statistic, 0.1, epsilon = 1e-9);
         prec::assert_abs_diff_eq!(pvalue, 0.8078867967299911, epsilon = 1e-9);
         let (statistic, pvalue) = ks_twosample(
-            data2.as_slice().try_into().unwrap(),
-            data1.as_slice().try_into().unwrap(),
+            data2.as_slice(),
+            data1.as_slice(),
             KSTwoSampleAlternativeMethod::LessAsymptotic,
             NaNPolicy::Error,
         )
@@ -843,8 +825,8 @@ mod tests {
         prec::assert_abs_diff_eq!(pvalue, 0.33213219147418116, epsilon = 1e-9);
 
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::GreaterAsymptotic,
             NaNPolicy::Error,
         )
@@ -853,8 +835,8 @@ mod tests {
         prec::assert_abs_diff_eq!(statistic, 0.26666666666666666, epsilon = 1e-9);
         prec::assert_abs_diff_eq!(pvalue, 0.33213219147418116, epsilon = 1e-9);
         let (statistic, pvalue) = ks_twosample(
-            data2.as_slice().try_into().unwrap(),
-            data1.as_slice().try_into().unwrap(),
+            data2.as_slice(),
+            data1.as_slice(),
             KSTwoSampleAlternativeMethod::GreaterAsymptotic,
             NaNPolicy::Error,
         )
@@ -873,8 +855,8 @@ mod tests {
         data2.sort_by(|a, b| a.total_cmp(b));
 
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedAsymptotic,
             NaNPolicy::Error,
         )
@@ -883,8 +865,8 @@ mod tests {
         prec::assert_abs_diff_eq!(statistic, 0.06450000000000002, epsilon = 1e-9);
         prec::assert_abs_diff_eq!(pvalue, 0.0003435848163318721, epsilon = 1e-4);
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedAsymptotic,
             NaNPolicy::Error,
         )
@@ -913,8 +895,8 @@ mod tests {
         x.sort_by(|a, b| a.total_cmp(b));
         y.sort_by(|a, b| a.total_cmp(b));
         let (statistic, pvalue) = ks_twosample(
-            x.as_slice().try_into().unwrap(),
-            y.as_slice().try_into().unwrap(),
+            x.as_slice(),
+            y.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
         )
@@ -937,8 +919,8 @@ mod tests {
         data2.sort_by(|a, b| a.total_cmp(b));
 
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedAsymptotic,
             NaNPolicy::Error,
         )
@@ -947,8 +929,8 @@ mod tests {
         prec::assert_abs_diff_eq!(statistic, 0.06450000000000002, epsilon = 1e-9);
         prec::assert_abs_diff_eq!(pvalue, 0.0003604729, epsilon = 1e-9);
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedAsymptotic,
             NaNPolicy::Error,
         )
@@ -968,8 +950,8 @@ mod tests {
         casein.sort_by(|a, b| a.total_cmp(b));
         meatmeal.sort_by(|a, b| a.total_cmp(b));
         let (statistic, pvalue) = ks_twosample(
-            casein.as_slice().try_into().unwrap(),
-            meatmeal.as_slice().try_into().unwrap(),
+            casein.as_slice(),
+            meatmeal.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
         )
@@ -979,8 +961,8 @@ mod tests {
         prec::assert_abs_diff_eq!(pvalue, 0.1956825, epsilon = 1e-6);
 
         let (statistic, pvalue) = ks_twosample(
-            meatmeal.as_slice().try_into().unwrap(),
-            casein.as_slice().try_into().unwrap(),
+            meatmeal.as_slice(),
+            casein.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
         )
@@ -998,8 +980,8 @@ mod tests {
         data2.sort_by(|a, b| a.total_cmp(b));
 
         let result = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
         );
@@ -1014,8 +996,8 @@ mod tests {
         data2.sort_by(|a, b| a.total_cmp(b));
 
         let result = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
         );
@@ -1027,8 +1009,8 @@ mod tests {
         data1.sort_by(|a, b| a.total_cmp(b));
         data2.sort_by(|a, b| a.total_cmp(b));
         let result = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Emit,
         );
@@ -1039,8 +1021,8 @@ mod tests {
         data1.sort_by(|a, b| a.total_cmp(b));
         data2.sort_by(|a, b| a.total_cmp(b));
         let result = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
         );
@@ -1052,8 +1034,8 @@ mod tests {
         data2.sort_by(|a, b| a.total_cmp(b));
 
         let result = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Emit,
         );
@@ -1096,8 +1078,8 @@ mod tests {
         data2.sort_by(|a, b| a.total_cmp(b));
 
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Emit,
         )
@@ -1114,8 +1096,8 @@ mod tests {
         data1.sort_by(|a, b| a.total_cmp(b));
         data2.sort_by(|a, b| a.total_cmp(b));
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Propogate,
         )
@@ -1129,8 +1111,8 @@ mod tests {
         data1.sort_by(|a, b| a.total_cmp(b));
         data2.sort_by(|a, b| a.total_cmp(b));
         let (statistic, pvalue) = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Propogate,
         )
@@ -1146,8 +1128,8 @@ mod tests {
         data1.sort_by(|a, b| a.total_cmp(b));
         data2.sort_by(|a, b| a.total_cmp(b));
         let result = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
         );
@@ -1159,8 +1141,8 @@ mod tests {
         data1.sort_by(|a, b| a.total_cmp(b));
         data2.sort_by(|a, b| a.total_cmp(b));
         let result = ks_twosample(
-            data1.as_slice().try_into().unwrap(),
-            data2.as_slice().try_into().unwrap(),
+            data1.as_slice(),
+            data2.as_slice(),
             KSTwoSampleAlternativeMethod::TwoSidedExact,
             NaNPolicy::Error,
         );

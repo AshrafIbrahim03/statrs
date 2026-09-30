@@ -4,9 +4,16 @@ use std::{
     slice::SliceIndex,
 };
 
-#[derive(Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub enum SortError {
     NotSorted,
+}
+impl core::fmt::Display for SortError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SortError::NotSorted => write!(f, "Sample is not sorted."),
+        }
+    }
 }
 
 pub struct SortedSlice<'a, T>(&'a [T]);
